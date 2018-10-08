@@ -12,7 +12,6 @@ class MMDialogPopupViewController: UIViewController {
     
     //MARK: - Public Interface
     var cornerRadius: CGFloat
-    var disableSwipeToDismiss = false
     var disableTapToDismiss = false
     
     func show(onViewController viewController: UIViewController) {
