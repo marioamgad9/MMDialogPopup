@@ -8,6 +8,11 @@
 
 import UIKit
 
+protocol MMDialogPopupDelegate: class {
+    var popupViewController: MMDialogPopupViewController? { get set }
+    var allowsTapToDismissPopupDialog: Bool { get }
+}
+
 class MMDialogPopupViewController: UIViewController {
     
     //MARK: - Public Interface
@@ -34,6 +39,14 @@ class MMDialogPopupViewController: UIViewController {
     
     private var containerCenterYConstraint: NSLayoutConstraint!
     private var containerOffscreenConstraint: NSLayoutConstraint!
+    
+    private var popupProtocolResponder: MMDialogPopupDelegate? {
+        if let protocolResponder = contentViewController as? MMDialogPopupDelegate {
+            return protocolResponder
+        } else {
+            return nil
+        }
+    }
     
     private var tapRecognizer: UITapGestureRecognizer!
     
@@ -75,6 +88,9 @@ class MMDialogPopupViewController: UIViewController {
         tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(tapOutside))
         tapRecognizer.delegate = self
         view.addGestureRecognizer(tapRecognizer)
+        
+        //Popup protocol responder
+        popupProtocolResponder?.popupViewController = self
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -140,7 +156,13 @@ extension MMDialogPopupViewController {
 //MARK: - Gestures
 extension MMDialogPopupViewController: UIGestureRecognizerDelegate {
     @objc private func tapOutside() {
-        animateOut()
+        if let protocolResponder = popupProtocolResponder {
+            if protocolResponder.allowsTapToDismissPopupDialog {
+                animateOut()
+            }
+        } else {
+            animateOut()
+        }
     }
     
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
