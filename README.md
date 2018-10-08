@@ -1,6 +1,8 @@
 # MMDialogPopup
 A UIViewController to easily show dialog popups in iOS
 
+![](MMDialogPopupDemo.gif)
+
 ## Usage
 #### Showing a DialogPopup
 Create an instance of MMDialogPopViewController, and then pass your view controller (The one you want to show as a popup) in.
