@@ -11,6 +11,7 @@ import UIKit
 protocol MMDialogPopupDelegate: class {
     var popupViewController: MMDialogPopupViewController? { get set }
     var allowsTapToDismissPopupDialog: Bool { get }
+    var allowsSwipeToDismissPopupDialog: Bool { get }
 }
 
 class MMDialogPopupViewController: UIViewController {
@@ -18,6 +19,7 @@ class MMDialogPopupViewController: UIViewController {
     //MARK: - Public Interface
     var cornerRadius: CGFloat
     var disableTapToDismiss = false
+    var disableSwipeToDismiss = false
     
     func show(onViewController viewController: UIViewController) {
         self.modalPresentationStyle = .overCurrentContext
@@ -37,8 +39,19 @@ class MMDialogPopupViewController: UIViewController {
     private let contentViewController: UIViewController
     private let contentView: UIView
     
+    private var hasAnimatedIn = false
+    
+    private var state = State.animatingIn
+    private var swipeOffset = CGFloat(0)
+    
+    private var displayLink: CADisplayLink!
+    private var lastTimeStamp: CFTimeInterval?
+    
     private var containerCenterYConstraint: NSLayoutConstraint!
     private var containerOffscreenConstraint: NSLayoutConstraint!
+    
+    private var tapRecognizer: UITapGestureRecognizer!
+    private var panRecognizer: UIPanGestureRecognizer!
     
     private var popupProtocolResponder: MMDialogPopupDelegate? {
         if let protocolResponder = contentViewController as? MMDialogPopupDelegate {
@@ -48,7 +61,19 @@ class MMDialogPopupViewController: UIViewController {
         }
     }
     
-    private var tapRecognizer: UITapGestureRecognizer!
+    //MARK: - State type
+    enum State {
+        case animatingIn
+        case idle
+        case panning
+        case animatingOut
+        case physicsOut(PhysicsState)
+    }
+    
+    struct PhysicsState {
+        let acceleration = CGFloat(9999)
+        var velocity = CGFloat(0)
+    }
     
     //MARK: - Initializers
     init(contentViewControler viewController: UIViewController, cornerRadius: Int = 8) {
@@ -69,13 +94,13 @@ class MMDialogPopupViewController: UIViewController {
         
         view.backgroundColor = UIColor.clear
         
-        //Container View
+        //Container view
         containerView.layer.cornerRadius = cornerRadius
         containerView.layer.masksToBounds = true
         view.addSubview(containerView)
         containerView.isUserInteractionEnabled = false
         
-        //Content View
+        //Content view
         addChild(contentViewController)
         containerView.addSubview(contentView)
         
@@ -84,22 +109,70 @@ class MMDialogPopupViewController: UIViewController {
         applyContentViewConstraints()
         containerOffscreenConstraint.isActive = true
         
-        //Tap Away Recognizer
+        //Tap outside recognizer
         tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(tapOutside))
         tapRecognizer.delegate = self
         view.addGestureRecognizer(tapRecognizer)
+        
+        //Pan recognizer
+        panRecognizer = UIPanGestureRecognizer(target: self, action: #selector(didPan))
+        panRecognizer.delegate = self
+        view.addGestureRecognizer(panRecognizer)
+        
+        //Display link
+        displayLink = CADisplayLink(target: self, selector: #selector(tick))
+        displayLink.add(to: .current, forMode: .common)
         
         //Popup protocol responder
         popupProtocolResponder?.popupViewController = self
     }
     
     override func viewDidAppear(_ animated: Bool) {
-        animateIn()
+        super.viewDidAppear(animated)
+        
+        if !hasAnimatedIn {
+            animateIn()
+            hasAnimatedIn = true
+        }
+    }
+    
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        
+        displayLink.invalidate()
     }
 }
 
 //MARK: - Animations
 extension MMDialogPopupViewController {
+    private func animate(fromPan panRecognizer: UIPanGestureRecognizer) {
+        let animateOutThreshold = CGFloat(50)
+        let velocity = panRecognizer.velocity(in: view).y
+        
+        if velocity > animateOutThreshold {
+            //Animate out
+            let physicsState = PhysicsState(velocity: velocity)
+            state = .physicsOut(physicsState)
+        } else {
+            //Snap back
+            animateSnapBackToCenter()
+        }
+    }
+    
+    private func animateSnapBackToCenter() {
+        swipeOffset = 0
+        view.setNeedsUpdateConstraints()
+        
+        UIView.animate(withDuration: introAnimationDuration,
+                       delay: 0.0,
+                       usingSpringWithDamping: 0.7,
+                       initialSpringVelocity: 0,
+                       options: [],
+                       animations: {
+                        self.view.layoutIfNeeded()
+        }, completion: { _ in })
+    }
+    
     private func animateIn() {
         //Animate background color
         UIView.animate(withDuration: introAnimationDuration,
@@ -122,10 +195,13 @@ extension MMDialogPopupViewController {
                         self.view.layoutIfNeeded()
         }, completion: { _ in
             self.containerView.isUserInteractionEnabled = true
+            self.state = .idle
         })
     }
+    
     private func animateOut() {
         view.isUserInteractionEnabled = false
+        state = .animatingOut
         
         //Animate background color
         UIView.animate(withDuration: outroAnimationDuration,
@@ -165,7 +241,50 @@ extension MMDialogPopupViewController: UIGestureRecognizerDelegate {
         }
     }
     
+    @objc private func didPan(recognizer: UIPanGestureRecognizer) {
+        if state == .animatingIn {
+            //If panned while animating in, stop all animations
+            state = .idle
+            self.view.layer.removeAllAnimations()
+            self.containerView.layer.removeAllAnimations()
+        }
+        
+        //Make sure that the state is either idle or panning
+        guard state == . idle || state == .panning else { return }
+        
+        let applyOffset = {
+            self.swipeOffset = recognizer.translation(in: self.view).y
+            self.view.setNeedsUpdateConstraints()
+        }
+        
+        switch recognizer.state {
+        case .possible:
+            break
+        case .began:
+            state = .panning
+            applyOffset()
+        case .changed:
+            state = .panning
+            applyOffset()
+        case .cancelled:
+            break
+        case . failed:
+            break
+        case .ended:
+            animate(fromPan: recognizer)
+        }
+    }
+    
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if let responder = popupProtocolResponder, gestureRecognizer === panRecognizer {
+            //Pan gesture triggered, check if swipe is enabled
+            if self.disableTapToDismiss {
+                return false
+            }
+            
+            return responder.allowsSwipeToDismissPopupDialog
+        }
+        
         if gestureRecognizer == tapRecognizer {
             //Tap gesture triggered, check if it is outside the view
             if self.disableTapToDismiss {
@@ -183,6 +302,23 @@ extension MMDialogPopupViewController: UIGestureRecognizerDelegate {
 
 //MARK: - Constraints
 extension MMDialogPopupViewController {
+    override func updateViewConstraints() {
+        super.updateViewConstraints()
+        
+        if swipeOffset < 0 {
+            //Elastic pull upwards
+            let offset = -swipeOffset
+            let offsetPct = (offset / view.bounds.size.width / 2)
+            let elasticity = CGFloat(3)
+            let percent = offsetPct / (1.0 + (offsetPct * elasticity))
+            
+            containerCenterYConstraint.constant = -(percent * view.bounds.size.width / 2)
+        } else {
+            //Regular tracking downwards
+            containerCenterYConstraint.constant = swipeOffset
+        }
+    }
+    
     private func applyContentViewConstraints() {
         contentView.translatesAutoresizingMaskIntoConstraints = false
         
@@ -200,7 +336,6 @@ extension MMDialogPopupViewController {
     }
     
     private func applyContainerViewConstraints() {
-        
         containerView.translatesAutoresizingMaskIntoConstraints = false
         
         let sideMargin = CGFloat(16)
@@ -250,5 +385,56 @@ extension MMDialogPopupViewController {
         containerOffscreenConstraint.priority = UILayoutPriority.required
         
         view.addConstraints([left, right, containerCenterYConstraint, limitHeight, containerOffscreenConstraint])
+    }
+}
+
+//MARK: - Display link
+extension MMDialogPopupViewController {
+    @objc func tick() {
+        //We need a previous time stamp to work with, bail if we don't have one
+        guard let last = lastTimeStamp else {
+            lastTimeStamp = displayLink.timestamp
+            return
+        }
+        
+        //Calculate dt
+        let dt = displayLink.timestamp - last
+        
+        //Save current time
+        lastTimeStamp = displayLink.timestamp
+        
+        //If we're using physics to animate out, update the simulation
+        guard case var State.physicsOut(physicsState) = state else {
+            return
+        }
+        
+        physicsState.velocity += CGFloat(dt) * physicsState.acceleration
+        
+        swipeOffset += physicsState.velocity * CGFloat(dt)
+        
+        view.setNeedsUpdateConstraints()
+        state = .physicsOut(physicsState)
+        
+        //Remove if the content view is off screen
+        if swipeOffset > view.bounds.size.height / 2 {
+            dismiss(animated: false)
+        }
+    }
+}
+
+//MARK: - Determine equality between two states
+func ==(lhs: MMDialogPopupViewController.State, rhs: MMDialogPopupViewController.State) -> Bool {
+    
+    switch (lhs, rhs) {
+    case (.animatingIn, .animatingIn):
+        return true
+    case (.idle, .idle):
+        return true
+    case (.panning, .panning):
+        return true
+    case (.physicsOut, .physicsOut):
+        return true
+    default:
+        return false
     }
 }
