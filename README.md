@@ -18,7 +18,7 @@ dialogPopup.show(onViewController: self)
 ```
 
 #### Conforming to MMDialogPopupDelegate
-Conforming to this delegate gives you the ability to change `allowTapToDismiss`, and to access the `popupViewController` to close it.
+Conforming to this delegate gives you the ability to change `allowsTapToDismissPopupDialog`, `allowsSwipeToDismissPopupDialog`, and to access the `popupViewController` to close it.
 
 #### Popup customization
 Public properties can be modified for MMDialogPopupViewController
