@@ -26,8 +26,8 @@ class DialogPopupViewController: UIViewController {
         viewController.present(self, animated: false)
     }
     
-    func close() {
-        animateOut()
+    func close(completionHandler: (() -> Void)? = nil) {
+        animateOut(completionHandler: completionHandler)
     }
     
     //MARK: - Private Properties
@@ -130,6 +130,9 @@ class DialogPopupViewController: UIViewController {
         
         //Subscribe to keyboard notifications
         subscribeToKeyboardNotifciations()
+        
+        //Add listener to dismiss keyboard on click
+        contentViewController.hideKeyboard()
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -250,7 +253,7 @@ extension DialogPopupViewController {
         })
     }
     
-    private func animateOut() {
+    private func animateOut(completionHandler: (() -> Void)? = nil) {
         view.isUserInteractionEnabled = false
         state = .animatingOut
         
@@ -273,9 +276,8 @@ extension DialogPopupViewController {
                        options: [],
                        animations: {
                         self.view.layoutIfNeeded()
-        }, completion: {
-            _ in
-            self.dismiss(animated: false, completion: nil)
+        }, completion: { _ in
+            self.dismiss(animated: false, completion: completionHandler)
         })
     }
 }
