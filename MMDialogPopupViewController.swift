@@ -8,13 +8,13 @@
 
 import UIKit
 
-protocol MMDialogPopupDelegate: class {
-    var popupViewController: MMDialogPopupViewController? { get set }
+protocol DialogPopupDelegate: class {
+    var popupViewController: DialogPopupViewController? { get set }
     var allowsTapToDismissPopupDialog: Bool { get }
     var allowsSwipeToDismissPopupDialog: Bool { get }
 }
 
-class MMDialogPopupViewController: UIViewController {
+class DialogPopupViewController: UIViewController {
     
     //MARK: - Public Interface
     var cornerRadius: CGFloat
@@ -32,7 +32,7 @@ class MMDialogPopupViewController: UIViewController {
     
     //MARK: - Private Properties
     private let introAnimationDuration = 0.6
-    private let outroAnimationDuration = 1.0
+    private let outroAnimationDuration = 0.8
     private let backgroundOpacity = CGFloat(0.4)
     
     private let containerView = UIView(frame: .zero)
@@ -53,8 +53,10 @@ class MMDialogPopupViewController: UIViewController {
     private var tapRecognizer: UITapGestureRecognizer!
     private var panRecognizer: UIPanGestureRecognizer!
     
-    private var popupProtocolResponder: MMDialogPopupDelegate? {
-        if let protocolResponder = contentViewController as? MMDialogPopupDelegate {
+    private var keyboardIsVisible = false
+    
+    private var popupProtocolResponder: DialogPopupDelegate? {
+        if let protocolResponder = contentViewController as? DialogPopupDelegate {
             return protocolResponder
         } else {
             return nil
@@ -76,7 +78,7 @@ class MMDialogPopupViewController: UIViewController {
     }
     
     //MARK: - Initializers
-    init(contentViewControler viewController: UIViewController, cornerRadius: Int = 8) {
+    init(contentViewControler viewController: UIViewController, cornerRadius: Int = Int(Dimens.cornerRadius)) {
         contentViewController = viewController
         contentView = viewController.view
         self.cornerRadius = CGFloat(cornerRadius)
@@ -125,6 +127,9 @@ class MMDialogPopupViewController: UIViewController {
         
         //Popup protocol responder
         popupProtocolResponder?.popupViewController = self
+        
+        //Subscribe to keyboard notifications
+        subscribeToKeyboardNotifciations()
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -143,8 +148,54 @@ class MMDialogPopupViewController: UIViewController {
     }
 }
 
+//MARK: - Keyboard notifications
+extension DialogPopupViewController {
+    func subscribeToKeyboardNotifciations() {
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(keyboardWillShow(with:)),
+                                               name: UIResponder.keyboardWillShowNotification,
+                                               object: nil)
+        
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(keyboardWillHide(with:)),
+                                               name: UIResponder.keyboardWillHideNotification,
+                                               object: nil)
+    }
+    
+    @objc func keyboardWillShow(with notification: Notification) {
+        let key = "UIKeyboardFrameEndUserInfoKey"
+        guard let keyboardFrame = notification.userInfo?[key] as? NSValue else {return}
+        
+        let keyboardHeight = keyboardFrame.cgRectValue.height + 8
+        
+        //Update keyboardIsVisible variable
+        keyboardIsVisible = true
+        
+        //Push center constraint
+        containerCenterYConstraint.constant = -keyboardHeight/2
+        
+        //Update with animations
+        UIView.animate(withDuration: 0.3) {
+            self.view.layoutIfNeeded()
+        }
+    }
+    
+    @objc func keyboardWillHide(with notification: Notification) {
+        //Update keyboardIsVisible variable
+        keyboardIsVisible = false
+        
+        //Return to center constraint
+        containerCenterYConstraint.constant = 0
+        
+        //Update with animations
+        UIView.animate(withDuration: 0.3) {
+            self.view.layoutIfNeeded()
+        }
+    }
+}
+
 //MARK: - Animations
-extension MMDialogPopupViewController {
+extension DialogPopupViewController {
     private func animate(fromPan panRecognizer: UIPanGestureRecognizer) {
         let animateOutThreshold = CGFloat(50)
         let velocity = panRecognizer.velocity(in: view).y
@@ -188,7 +239,7 @@ extension MMDialogPopupViewController {
         
         UIView.animate(withDuration: introAnimationDuration,
                        delay: 0.0,
-                       usingSpringWithDamping: 0.84,
+                       usingSpringWithDamping: 0.8,
                        initialSpringVelocity: 0,
                        options: [.allowUserInteraction],
                        animations: {
@@ -230,8 +281,14 @@ extension MMDialogPopupViewController {
 }
 
 //MARK: - Gestures
-extension MMDialogPopupViewController: UIGestureRecognizerDelegate {
+extension DialogPopupViewController: UIGestureRecognizerDelegate {
     @objc private func tapOutside() {
+        //Hide keyboard if visible and return
+        if keyboardIsVisible {
+            dismissKeyboard()
+            return
+        }
+        
         if let protocolResponder = popupProtocolResponder {
             if protocolResponder.allowsTapToDismissPopupDialog {
                 animateOut()
@@ -277,6 +334,9 @@ extension MMDialogPopupViewController: UIGestureRecognizerDelegate {
     
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if let responder = popupProtocolResponder, gestureRecognizer === panRecognizer {
+            //Return if keyboard is shown
+            if self.keyboardIsVisible { return false }
+            
             //Pan gesture triggered, check if swipe is enabled
             if self.disableTapToDismiss {
                 return false
@@ -301,7 +361,7 @@ extension MMDialogPopupViewController: UIGestureRecognizerDelegate {
 }
 
 //MARK: - Constraints
-extension MMDialogPopupViewController {
+extension DialogPopupViewController {
     override func updateViewConstraints() {
         super.updateViewConstraints()
         
@@ -389,7 +449,7 @@ extension MMDialogPopupViewController {
 }
 
 //MARK: - Display link
-extension MMDialogPopupViewController {
+extension DialogPopupViewController {
     @objc func tick() {
         //We need a previous time stamp to work with, bail if we don't have one
         guard let last = lastTimeStamp else {
@@ -423,7 +483,7 @@ extension MMDialogPopupViewController {
 }
 
 //MARK: - Determine equality between two states
-func ==(lhs: MMDialogPopupViewController.State, rhs: MMDialogPopupViewController.State) -> Bool {
+func ==(lhs: DialogPopupViewController.State, rhs: DialogPopupViewController.State) -> Bool {
     
     switch (lhs, rhs) {
     case (.animatingIn, .animatingIn):
