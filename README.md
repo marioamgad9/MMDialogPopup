@@ -27,4 +27,4 @@ Public properties can be modified for MMDialogPopupViewController
 Mario Amgad Mouris, marioamgad9@gmail.com
 
 ## Disclaimer
-This view controller is heavily influnced by [Steve Barnegren's](https://github.com/SteveBarnegren/SBCardPopup) one 
+This view controller is influnced by [Steve Barnegren's](https://github.com/SteveBarnegren/SBCardPopup) one 
